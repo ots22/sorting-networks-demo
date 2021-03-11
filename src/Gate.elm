@@ -47,7 +47,7 @@ run : Gate -> Array Int -> Array Int
 run g inputs =
     case g of
         Id n ->
-            Util.id inputs
+            identity inputs
 
         CompareSwap { n, i, j, descend } ->
             let mx = Array.get i inputs
