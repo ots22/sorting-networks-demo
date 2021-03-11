@@ -130,42 +130,65 @@ amend a c =
 ----------------------------------------
 -- Some circuits
 
-id : Int -> Circuit ()
+id : Int -> Circuit String
 id n =
-    Primitive () (Gate.Id n)
+    Primitive "" (Gate.Id n)
 
 
-compareSwap : Int -> Int -> Int -> Bool -> Circuit ()
-compareSwap n i j descend =
-    Primitive () (Gate.CompareSwap { n = n
+type SortDirection = Ascending | Descending
+
+sortDirectionToString : SortDirection -> String
+sortDirectionToString d =
+    case d of
+        Ascending -> "Ascending"
+        Descending -> "Descending"
+
+
+compareSwap : Int -> Int -> Int -> SortDirection -> Circuit String
+compareSwap n i j sortDirection =
+    Primitive "" (Gate.CompareSwap { n = n
                                    , i = i
                                    , j = j
-                                   , descend = descend
+                                   , descend = (sortDirection == Descending)
                                    })
 
 
-bitonicCompareSwap : Int -> Bool -> Circuit ()
-bitonicCompareSwap n desc =
-    List.foldl (\i c -> seq c (compareSwap n i (i + n//2) desc))
-        (id n)
-        (List.range 0 (n//2 - 1))
+bitonicCompareSwap : Int -> SortDirection -> Circuit String
+bitonicCompareSwap n sortDirection =
+    amend (String.join " " [ "bitonicCompareSwap"
+                           , String.fromInt n
+                           , sortDirectionToString sortDirection
+                           ])
+        <| List.foldl (\i c -> Seq "" c (compareSwap n i (i + n//2) sortDirection))
+            (id n)
+            (List.range 0 (n//2 - 1))
 
 
-bitonicMerge : Int -> Bool -> Circuit ()
-bitonicMerge n desc =
-    if n == 1 then
-        id 1
-    else
-        seq (bitonicCompareSwap n desc)
-            (par (bitonicMerge (n//2) desc)
-                 (bitonicMerge (n//2) desc))
+bitonicMerge : Int -> SortDirection -> Circuit String
+bitonicMerge n sortDirection =
+    amend (String.join " " [ "bitonicMerge"
+                           , String.fromInt n
+                           , sortDirectionToString sortDirection
+                           ])
+        <| if n == 1 then
+               id 1
+           else
+               Seq "" (bitonicCompareSwap n sortDirection)
+                   (Par ""
+                        (bitonicMerge (n//2) sortDirection)
+                        (bitonicMerge (n//2) sortDirection))
 
 
-bitonicSort : Int -> Bool -> Circuit ()
-bitonicSort n desc =
-    if n == 1 then
-        id 1
-    else
-        seq (par (bitonicSort (n//2) True)
-                 (bitonicSort (n//2) False))
-            (bitonicMerge n desc)
+bitonicSort : Int -> SortDirection -> Circuit String
+bitonicSort n sortDirection =
+    amend (String.join " " [ "bitonicSort"
+                           , String.fromInt n
+                           , sortDirectionToString sortDirection
+                           ])
+        <| if n == 1 then
+               id 1
+           else
+               Seq "" (Par ""
+                           (bitonicSort (n//2) Descending)
+                           (bitonicSort (n//2) Ascending))
+                   (bitonicMerge n sortDirection)

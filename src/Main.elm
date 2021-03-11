@@ -227,7 +227,7 @@ type alias WireSelection =
 
 
 type alias Model =
-    { circuit : Circuit ((), Layout)
+    { circuit : Circuit (String, Layout)
     , selectedBox : Maybe Int
     , selectedWire : Maybe WireSelection
     }
@@ -417,19 +417,22 @@ describeSelection model =
         Just (Circuit.Seq _ _ _) ->
             Html.text "Seq"
 
-        Just (Circuit.Par _ _ _) ->
-            Html.text "Par"
+appendIOGates : Circuit String -> Circuit String
+appendIOGates c =
+    Circuit.Seq ""
+        (Circuit.Seq ""
+             (Circuit.amend "Input" (Circuit.id (Circuit.fanIn c)))
+             c)
+        (Circuit.amend "Output" (Circuit.id (Circuit.fanOut c)))
 
                 
 init : () -> (Model, Cmd Msg)
 init _ =
     ( { circuit = layout
-            <| Circuit.seq
-                (Circuit.seq
-                     (Circuit.id 16)
-                     (Circuit.simplify (Circuit.bitonicSort 16 True)))
-                (Circuit.id 16)
-
+            <| appendIOGates
+            <| Circuit.simplify
+            <| Circuit.bitonicSort 16 Circuit.Descending
+            
       , selectedBox = Nothing
       , selectedWire = Nothing
       }
