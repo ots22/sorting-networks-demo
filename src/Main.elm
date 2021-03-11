@@ -270,21 +270,41 @@ drawWires selection ul vl =
                             else
                                 "black"
             in
-                Svg.line
-                    [ SvgAttr.stroke colour
+                -- Svg.line
+                --     [ SvgAttr.stroke colour
+                --     , SvgAttr.strokeWidth "0.02"
+                --     , SvgAttr.x1 <| String.fromFloat uTermOut.x
+                --     , SvgAttr.y1 <| String.fromFloat uTermOut.y
+                --     , SvgAttr.x2 <| String.fromFloat vTermIn.x
+                --     , SvgAttr.y2 <| String.fromFloat vTermIn.y
+                --     , Svg.Events.onMouseOver
+                --           <| WireSelect (Just { from = ul.id
+                --                               , to = vl.id
+                --                               , outTerm = outTermIdx
+                --                               })
+                --     , Svg.Events.onMouseOut <| WireSelect Nothing
+                --     ]
+                --     []
+                Svg.path
+                    [ SvgAttr.fill "none"
+                    , SvgAttr.stroke colour
                     , SvgAttr.strokeWidth "0.02"
-                    , SvgAttr.x1 <| String.fromFloat uTermOut.x
-                    , SvgAttr.y1 <| String.fromFloat uTermOut.y
-                    , SvgAttr.x2 <| String.fromFloat vTermIn.x
-                    , SvgAttr.y2 <| String.fromFloat vTermIn.y
                     , Svg.Events.onMouseOver
                           <| WireSelect (Just { from = ul.id
                                               , to = vl.id
                                               , outTerm = outTermIdx
                                               })
                     , Svg.Events.onMouseOut <| WireSelect Nothing
+                    , SvgPath.d
+                          [ SvgPath.MoveTo False <| Point.toTuple uTermOut
+                          , SvgPath.CurveTo False
+                              (Point.toTuple (Point.add uTermOut <| Point.make (vTermIn.x - uTermOut.x) 0.0))
+                              (Point.toTuple (Point.add vTermIn <| Point.make (uTermOut.x - vTermIn.x) 0.0))
+                              (Point.toTuple vTermIn)
+                          ]
                     ]
                     []
+                        
     in
         List.map3 helper
             ul.terminalsOut
@@ -292,7 +312,7 @@ drawWires selection ul vl =
             (List.range 0 (List.length ul.terminalsOut - 1))
 
 
-drawOneWire arrow from to =
+drawConnector arrow from to =
     Svg.line
         (List.append
              [ SvgAttr.stroke "black"
@@ -312,7 +332,7 @@ drawGate g layoutData =
         Gate.Id _ ->
             Svg.g
                 [ ]
-                (List.map2 (drawOneWire False)
+                (List.map2 (drawConnector False)
                      layoutData.terminalsIn
                      layoutData.terminalsOut)
 
@@ -343,13 +363,13 @@ drawGate g layoutData =
                 Svg.g
                     [ ]
                     (List.append
-                         (List.map2 (drawOneWire False)
+                         (List.map2 (drawConnector False)
                               layoutData.terminalsIn
                               layoutData.terminalsOut)
                          
                          (case (mY1, mY2) of
                               (Just y1, Just y2) ->
-                                  [ drawOneWire
+                                  [ drawConnector
                                         True
                                         (Point.make x y1)
                                         (Point.make x y2)
@@ -422,12 +442,19 @@ describeSelection model =
     case Util.bind model.selectedBox (getCircuitById model.circuit) of
         Nothing ->
             Html.text ""
+            
+        Just (Circuit.Primitive (description, _) g) ->
+            Html.div []
+                [ (Html.div [] [ Html.text <| Gate.name g ])
+                , (Html.div [] [ Html.text description ])
+                ]
+                
+        Just (Circuit.Seq (description, _) _ _) ->
+            Html.text description
+                
+        Just (Circuit.Par (description, _) _ _) ->
+            Html.text description
 
-        Just (Circuit.Primitive _ g) ->
-            Html.text <| Gate.name g
-
-        Just (Circuit.Seq _ _ _) ->
-            Html.text "Seq"
 
 appendIOGates : Circuit String -> Circuit String
 appendIOGates c =
