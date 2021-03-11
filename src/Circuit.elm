@@ -192,3 +192,17 @@ bitonicSort n sortDirection =
                            (bitonicSort (n//2) Descending)
                            (bitonicSort (n//2) Ascending))
                    (bitonicMerge n sortDirection)
+
+
+
+sum : Int -> Circuit String
+sum n =
+    amend "Sum"
+        <| if n == 1 then
+               id 1
+           else if n == 2 then
+               Primitive "" Gate.Add
+           else
+               Seq "" (Par "" (sum (n - 1)) (sum (n - 1))) <| sum 2
+
+    

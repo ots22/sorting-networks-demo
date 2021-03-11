@@ -11,6 +11,7 @@ type Gate
                   , j : Int
                   , descend : Bool
                   }
+    | Add
 
 
 fanIn : Gate -> Int
@@ -22,6 +23,9 @@ fanIn g =
         CompareSwap { n } ->
             n
 
+        Add ->
+            2
+
 
 fanOut : Gate -> Int
 fanOut g =
@@ -32,6 +36,9 @@ fanOut g =
         CompareSwap { n } ->
             n
 
+        Add ->
+            1
+
 
 name : Gate -> String
 name g =
@@ -41,6 +48,9 @@ name g =
 
         CompareSwap _ ->
             "CompareSwap"
+
+        Add ->
+            "Add"
 
 
 run : Gate -> Array Int -> Array Int
@@ -62,3 +72,6 @@ run g inputs =
 
                     _ ->
                         inputs
+
+        Add ->
+            Array.fromList [ List.sum << Array.toList <| inputs ]

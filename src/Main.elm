@@ -86,8 +86,8 @@ gateWidth g =
         Gate.CompareSwap _ ->
             0.3
 
-        -- _ ->
-        --     1.0
+        _ ->
+            1.0
 
 
 gateHeight : Gate -> Float
@@ -316,6 +316,18 @@ drawGate g layoutData =
                      layoutData.terminalsIn
                      layoutData.terminalsOut)
 
+        Gate.Add ->
+            Svg.rect
+                [ SvgAttr.fill "transparent"
+                , SvgAttr.stroke "black"
+                , SvgAttr.strokeWidth "0.02"
+                , SvgAttr.x <| String.fromFloat <| layoutData.posn.x
+                , SvgAttr.y <| String.fromFloat <| layoutData.posn.y + 0.4
+                , SvgAttr.width <| String.fromFloat <| layoutData.size.x
+                , SvgAttr.height <| String.fromFloat <| layoutData.size.y - 0.8
+                ]
+                [ ]
+                    
         Gate.CompareSwap { n, i, j, descend } ->
             let (i2, j2) = if descend then (i, j) else (j, i)
                 
