@@ -84,7 +84,7 @@ simplifyHelper c =
 
         Seq a (Primitive _ (Gate.Id _)) v ->
             Tuple.mapFirst (amend a) (simplifyHelper v)
-            
+
         Seq a u (Primitive _ (Gate.Id _)) ->
             Tuple.mapFirst (amend a) (simplifyHelper u)
 
@@ -194,7 +194,6 @@ bitonicSort n sortDirection =
                    (bitonicMerge n sortDirection)
 
 
-
 sum : Int -> Circuit String
 sum n =
     amend "Sum"
@@ -204,5 +203,3 @@ sum n =
                Primitive "" Gate.Add
            else
                Seq "" (Par "" (sum (n - 1)) (sum (n - 1))) <| sum 2
-
-    

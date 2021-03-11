@@ -183,7 +183,7 @@ layout = Tuple.first << layoutHelper (Point.make 0.0 0.0) 0
 
 -- efficient lookup of a subcircuit by id (all 'right' children have
 -- greater ids than the 'left' children)
-         
+
 getCircuitByIdHelper : Int
                      -> Circuit (a, Layout)
                      -> Circuit (a, Layout)
@@ -304,7 +304,7 @@ drawWires selection ul vl =
                           ]
                     ]
                     []
-                        
+
     in
         List.map3 helper
             ul.terminalsOut
@@ -320,7 +320,7 @@ drawConnector arrow from to =
              , SvgAttr.x1 <| String.fromFloat from.x
              , SvgAttr.y1 <| String.fromFloat from.y
              , SvgAttr.x2 <| String.fromFloat to.x
-             , SvgAttr.y2 <| String.fromFloat to.y            
+             , SvgAttr.y2 <| String.fromFloat to.y
              ]
              (if arrow then [SvgAttr.markerEnd "url(#arrow)"] else [ ]))
         [ ]
@@ -347,10 +347,10 @@ drawGate g layoutData =
                 , SvgAttr.height <| String.fromFloat <| layoutData.size.y - 0.8
                 ]
                 [ ]
-                    
+
         Gate.CompareSwap { n, i, j, descend } ->
             let (i2, j2) = if descend then (i, j) else (j, i)
-                
+
                 mY1 = Array.get i2 (Array.fromList layoutData.terminalsIn)
                       |> Maybe.map (.y)
 
@@ -366,7 +366,7 @@ drawGate g layoutData =
                          (List.map2 (drawConnector False)
                               layoutData.terminalsIn
                               layoutData.terminalsOut)
-                         
+
                          (case (mY1, mY2) of
                               (Just y1, Just y2) ->
                                   [ drawConnector
@@ -442,16 +442,16 @@ describeSelection model =
     case Util.bind model.selectedBox (getCircuitById model.circuit) of
         Nothing ->
             Html.text ""
-            
+
         Just (Circuit.Primitive (description, _) g) ->
             Html.div []
                 [ (Html.div [] [ Html.text <| Gate.name g ])
                 , (Html.div [] [ Html.text description ])
                 ]
-                
+
         Just (Circuit.Seq (description, _) _ _) ->
             Html.text description
-                
+
         Just (Circuit.Par (description, _) _ _) ->
             Html.text description
 
@@ -464,14 +464,14 @@ appendIOGates c =
              c)
         (Circuit.amend "Output" (Circuit.id (Circuit.fanOut c)))
 
-                
+
 init : () -> (Model, Cmd Msg)
 init _ =
     ( { circuit = layout
             <| appendIOGates
             <| Circuit.simplify
             <| Circuit.bitonicSort 16 Circuit.Descending
-            
+
       , selectedBox = Nothing
       , selectedWire = Nothing
       }
