@@ -82,11 +82,11 @@ simplifyHelper c =
         Primitive _ _ ->
             (c, True)
 
-        Seq _ (Primitive _ (Gate.Id _)) v ->
-            simplifyHelper v
+        Seq a (Primitive _ (Gate.Id _)) v ->
+            Tuple.mapFirst (amend a) (simplifyHelper v)
             
-        Seq _ u (Primitive _ (Gate.Id _)) ->
-            simplifyHelper u
+        Seq a u (Primitive _ (Gate.Id _)) ->
+            Tuple.mapFirst (amend a) (simplifyHelper u)
 
         Seq a u v ->
             let (uSimplified, uFinished) = simplifyHelper u
@@ -112,6 +112,19 @@ simplifyHelper c =
 
 simplify : Circuit a -> Circuit a
 simplify = Tuple.first << simplifyHelper
+
+
+amend : a -> Circuit a -> Circuit a
+amend a c =
+    case c of
+        Primitive _ g ->
+            Primitive a g
+
+        Seq _ u v ->
+            Seq a u v
+
+        Par _ u v ->
+            Par a u v
 
 
 ----------------------------------------
