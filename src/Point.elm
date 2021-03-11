@@ -14,3 +14,7 @@ add : Point -> Point -> Point
 add a b = { x = a.x + b.x
           , y = a.y + b.y
           }
+
+
+toTuple : Point -> (Float, Float)
+toTuple {x, y} = (x, y)
