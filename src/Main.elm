@@ -3,6 +3,9 @@ module Main exposing (..)
 import Browser
 import Html exposing (Html, button, div, text)
 import Html.Events exposing (onClick)
+import Browser.Events exposing (onKeyPress)
+import Json.Decode as Decode
+
 import Svg exposing (Svg)
 import Svg.Attributes as SvgAttr
 import Svg.Events
@@ -21,6 +24,7 @@ import Point exposing (Point)
 
 type alias Layout =
     { id : Int
+    , unit : Float
     , posn : Point
     , size : Point
     , terminalsIn : List Point
@@ -55,17 +59,32 @@ translate : Point -> Circuit (a, Layout) -> Circuit (a, Layout)
 translate p c =
     let f =
             Tuple.mapSecond
-                (\layoutData ->
-                     {layoutData
-                         | posn = Point.add p layoutData.posn
-                         , terminalsIn =
-                          List.map (Point.add p) layoutData.terminalsIn
-                         , terminalsOut =
-                          List.map (Point.add p) layoutData.terminalsOut
+                (\{id, unit, posn, size, terminalsIn, terminalsOut} ->
+                     { id = id
+                     , unit = unit
+                     , posn = Point.add p posn
+                     , size = size
+                     , terminalsIn = List.map (Point.add p) terminalsIn
+                     , terminalsOut = List.map (Point.add p) terminalsOut
                      })
     in Circuit.map f c
 
 
+scale : Float -> Circuit (a, Layout) -> Circuit (a, Layout)
+scale a c =
+    let f =
+            Tuple.mapSecond
+                (\{id, unit, posn, size, terminalsIn, terminalsOut} ->
+                     { id = id
+                     , unit = a * unit
+                     , posn = Point.scale a posn
+                     , size = Point.scale a size
+                     , terminalsIn = List.map (Point.scale a) terminalsIn
+                     , terminalsOut = List.map (Point.scale a) terminalsOut
+                     })
+    in Circuit.map f c
+
+        
 terminalPosns : Int -> Point -> Float -> List Point
 terminalPosns n startPos h =
     List.map
@@ -92,7 +111,7 @@ gateWidth g =
 
 gateHeight : Gate -> Float
 gateHeight g =
-    1.0 * toFloat (max (Gate.fanIn g) (Gate.fanOut g))
+    toFloat (max (Gate.fanIn g) (Gate.fanOut g))
 
 
 layoutHelper : Point -> Int -> Circuit a -> (Circuit (a, Layout), Int)
@@ -103,6 +122,7 @@ layoutHelper startPos startId c =
                 h = gateHeight g
                 layoutData =
                     { id = startId
+                    , unit = 1.0
                     , posn = startPos
                     , size = Point.make w h
                     , terminalsIn =
@@ -134,6 +154,7 @@ layoutHelper startPos startId c =
 
                 layoutData =
                     { id = startId
+                    , unit = 1.0
                     , posn = startPos
                     , size = Point.make (w + 2.0 * pad) h
                     , terminalsIn =
@@ -151,7 +172,7 @@ layoutHelper startPos startId c =
                 )
 
         Circuit.Seq nodeData u v ->
-            let pad = 0.1
+            let pad = 0.15
                 uPos = Point.add (Point.make pad 0.0) startPos
                 (u1, nextId1) = layoutHelper uPos (startId + 1) u
 
@@ -166,6 +187,7 @@ layoutHelper startPos startId c =
 
                 layoutData =
                     { id = startId
+                    , unit = 1.0
                     , posn = startPos
                     , size = Point.make (w + 3.0 * pad) h
                     , terminalsIn = (getLayout u2).terminalsIn
@@ -183,7 +205,6 @@ layout = Tuple.first << layoutHelper (Point.make 0.0 0.0) 0
 
 -- efficient lookup of a subcircuit by id (all 'right' children have
 -- greater ids than the 'left' children)
-
 getCircuitByIdHelper : Int
                      -> Circuit (a, Layout)
                      -> Circuit (a, Layout)
@@ -230,27 +251,31 @@ type alias Model =
     { circuit : Circuit (String, Layout)
     , selectedBox : Maybe Int
     , selectedWire : Maybe WireSelection
+    , imgWidth : Int
     }
 
 
 type Msg
     = BoxSelect (Maybe Int)
     | WireSelect (Maybe WireSelection)
+    | ZoomIn
+    | ZoomOut
+    | NoOp
 
 
 drawBox : Layout -> Bool -> Svg Msg
 drawBox layoutData selected =
     Svg.rect
         [ SvgAttr.fill "transparent"
-        , if selected then (SvgAttr.stroke "lightsteelblue") else (SvgAttr.stroke "none")
-        , SvgAttr.strokeWidth "0.03"
-        , SvgAttr.strokeDasharray "0.1,0.1"
+        , SvgAttr.stroke <| if selected then "lightsteelblue" else "none"
+        , SvgAttr.strokeWidth "3.0"
+        , SvgAttr.strokeDasharray "10.0,10.0"
         , SvgAttr.x <| String.fromFloat <| layoutData.posn.x
         , SvgAttr.y <| String.fromFloat <| layoutData.posn.y
         , SvgAttr.width <| String.fromFloat <| layoutData.size.x
         , SvgAttr.height <| String.fromFloat <| layoutData.size.y
-        , SvgAttr.rx "0.05"
-        , SvgAttr.ry "0.05"
+        , SvgAttr.rx "5.0"
+        , SvgAttr.ry "5.0"
         , Svg.Events.onMouseOver <| BoxSelect (Just layoutData.id)
         , Svg.Events.onMouseOut <| BoxSelect Nothing
         ]
@@ -270,25 +295,10 @@ drawWires selection ul vl =
                             else
                                 "black"
             in
-                -- Svg.line
-                --     [ SvgAttr.stroke colour
-                --     , SvgAttr.strokeWidth "0.02"
-                --     , SvgAttr.x1 <| String.fromFloat uTermOut.x
-                --     , SvgAttr.y1 <| String.fromFloat uTermOut.y
-                --     , SvgAttr.x2 <| String.fromFloat vTermIn.x
-                --     , SvgAttr.y2 <| String.fromFloat vTermIn.y
-                --     , Svg.Events.onMouseOver
-                --           <| WireSelect (Just { from = ul.id
-                --                               , to = vl.id
-                --                               , outTerm = outTermIdx
-                --                               })
-                --     , Svg.Events.onMouseOut <| WireSelect Nothing
-                --     ]
-                --     []
                 Svg.path
                     [ SvgAttr.fill "none"
                     , SvgAttr.stroke colour
-                    , SvgAttr.strokeWidth "0.02"
+                    , SvgAttr.strokeWidth "1.5"
                     , Svg.Events.onMouseOver
                           <| WireSelect (Just { from = ul.id
                                               , to = vl.id
@@ -298,13 +308,20 @@ drawWires selection ul vl =
                     , SvgPath.d
                           [ SvgPath.MoveTo False <| Point.toTuple uTermOut
                           , SvgPath.CurveTo False
-                              (Point.toTuple (Point.add uTermOut <| Point.make (vTermIn.x - uTermOut.x) 0.0))
-                              (Point.toTuple (Point.add vTermIn <| Point.make (uTermOut.x - vTermIn.x) 0.0))
+                              (Point.toTuple
+                                   (Point.add uTermOut
+                                        <| Point.make
+                                            (vTermIn.x - uTermOut.x)
+                                            0.0))
+                              (Point.toTuple
+                                   (Point.add vTermIn
+                                        <| Point.make
+                                            (uTermOut.x - vTermIn.x)
+                                            0.0))
                               (Point.toTuple vTermIn)
                           ]
                     ]
                     []
-
     in
         List.map3 helper
             ul.terminalsOut
@@ -316,7 +333,7 @@ drawConnector arrow from to =
     Svg.line
         (List.append
              [ SvgAttr.stroke "black"
-             , SvgAttr.strokeWidth "0.02"
+             , SvgAttr.strokeWidth "1.5"
              , SvgAttr.x1 <| String.fromFloat from.x
              , SvgAttr.y1 <| String.fromFloat from.y
              , SvgAttr.x2 <| String.fromFloat to.x
@@ -340,11 +357,19 @@ drawGate g layoutData =
             Svg.rect
                 [ SvgAttr.fill "transparent"
                 , SvgAttr.stroke "black"
-                , SvgAttr.strokeWidth "0.02"
-                , SvgAttr.x <| String.fromFloat <| layoutData.posn.x
-                , SvgAttr.y <| String.fromFloat <| layoutData.posn.y + 0.4
-                , SvgAttr.width <| String.fromFloat <| layoutData.size.x
-                , SvgAttr.height <| String.fromFloat <| layoutData.size.y - 0.8
+                , SvgAttr.strokeWidth "1.5"
+                , SvgAttr.x
+                      <| String.fromFloat
+                      <| layoutData.posn.x
+                , SvgAttr.y
+                      <| String.fromFloat
+                      <| layoutData.posn.y + 0.4 * layoutData.unit
+                , SvgAttr.width
+                      <| String.fromFloat
+                      <| layoutData.size.x
+                , SvgAttr.height
+                      <| String.fromFloat
+                      <| layoutData.size.y - 0.8 * layoutData.unit
                 ]
                 [ ]
 
@@ -402,39 +427,51 @@ drawCircuitHelper model collect =
 
 drawCircuit : Model -> Svg Msg
 drawCircuit model =
-    let w = String.fromFloat <| (width model.circuit + 0.2)
-        h = String.fromFloat <| (height model.circuit + 0.2)
-        r = (width model.circuit + 0.2) / (height model.circuit + 0.2)
-        imgWidth = 1000
-        imgHeight = round (imgWidth / r)
+    let w = String.fromFloat <| width model.circuit
+        h = String.fromFloat <| height model.circuit
+        r = (width model.circuit) / (height model.circuit)
+        imgWidth = model.imgWidth    
+        imgHeight = round (toFloat model.imgWidth / r)
+        padWidth = 10.0
+        padHeight = padWidth / r
     in
         Svg.svg
             [ SvgAttr.width  <| String.fromInt imgWidth
             , SvgAttr.height <| String.fromInt imgHeight
-            , SvgAttr.viewBox (String.join " " ["-0.1", "-0.1", w, h])
+            , SvgAttr.viewBox
+                  <| String.join " "
+                  <| List.map String.fromFloat
+                      [ -padWidth
+                      , -padWidth
+                      , (toFloat imgWidth) + 2.0 * padWidth
+                      , (toFloat imgHeight) + 2.0 * padWidth
+                      ]
             , SvgAttr.preserveAspectRatio "xMidYMid meet"
             ]
-            (List.append
-                 [ Svg.defs
-                       []
-                       [ Svg.marker
-                             [ SvgAttr.id "arrow"
-                             , SvgAttr.markerWidth "10"
-                             , SvgAttr.markerHeight "10"
-                             , SvgAttr.refX "9"
-                             , SvgAttr.refY "3"
-                             , SvgAttr.orient "auto"
-                             , SvgAttr.markerUnits "strokeWidth" ]
-                             [ Svg.path
-                                   [ SvgPath.d [ SvgPath.MoveTo False (0.0, 0.0)
-                                               , SvgPath.LineTo False (0.0, 6.0)
-                                               , SvgPath.LineTo False (9.0, 3.0)
-                                               , SvgPath.ClosePath ]
-                                   ]
-                                   [ ]
-                             ]
-                       ] ]
-                 (drawCircuitHelper model []))
+            <| List.append
+                [ Svg.defs
+                      []
+                      [ Svg.marker
+                            [ SvgAttr.id "arrow"
+                            , SvgAttr.markerWidth "10"
+                            , SvgAttr.markerHeight "10"
+                            , SvgAttr.refX "9"
+                            , SvgAttr.refY "3"
+                            , SvgAttr.orient "auto"
+                            , SvgAttr.markerUnits "strokeWidth" ]
+                            [ Svg.path
+                                  [ SvgPath.d
+                                        [ SvgPath.MoveTo False (0.0, 0.0)
+                                        , SvgPath.LineTo False (0.0, 6.0)
+                                        , SvgPath.LineTo False (9.0, 3.0)
+                                        , SvgPath.ClosePath
+                                        ]
+                                  ]
+                                  [ ]
+                            ]
+                      ]
+                ]
+                (drawCircuitHelper model [])
 
 
 describeSelection : Model -> Html Msg
@@ -467,16 +504,22 @@ appendIOGates c =
 
 init : () -> (Model, Cmd Msg)
 init _ =
-    ( { circuit = layout
+    let c = layout
             <| appendIOGates
-            <| Circuit.simplify
-            <| Circuit.bitonicSort 16 Circuit.Descending
-
-      , selectedBox = Nothing
-      , selectedWire = Nothing
-      }
-    , Cmd.none
-    )
+            -- <| Circuit.simplify
+            <| (Circuit.Seq ""
+                    (Circuit.Primitive "" (Gate.Id 2))
+                    (Circuit.Primitive "" (Gate.Id 1)))
+            -- <| Circuit.bitonicSort 32 Circuit.Descending
+            -- <| Circuit.Seq "" (Circuit.Primitive "" Gate.Add) (Circuit.Primitive "" Gate.Add)
+    in
+        ( { circuit = scale 100.0 c
+          , selectedBox = Nothing
+          , selectedWire = Nothing
+          , imgWidth = round <| 100.0 * width c
+          }
+        , Cmd.none
+        )
 
 
 update : Msg -> Model -> (Model, Cmd Msg)
@@ -492,6 +535,25 @@ update msg model =
             , Cmd.none
             )
 
+        ZoomIn ->
+            ( { model
+                  | imgWidth = round <| (toFloat model.imgWidth) * 1.1
+                  , circuit = scale 1.1 model.circuit
+              }
+            , Cmd.none
+            )
+
+        ZoomOut ->
+            ( { model
+                  | imgWidth = round <| (toFloat model.imgWidth) * 0.9
+                  , circuit = scale 0.9 model.circuit
+              }
+            , Cmd.none
+            )
+
+        NoOp ->
+            ( model, Cmd.none )
+
 
 view : Model -> Html Msg
 view model =
@@ -501,12 +563,34 @@ view model =
         ]
 
 
+handleKeyPress : String -> Msg
+handleKeyPress keyValue =
+    case keyValue of
+        "+" ->
+            ZoomIn
+
+        "-" ->
+            ZoomOut
+
+        _ ->
+            NoOp
+
+
 subscriptions : Model -> Sub Msg
-subscriptions model =
-    Sub.none
+subscriptions _ =
+    onKeyPress
+    <| Decode.map handleKeyPress
+    <| Decode.field "key" Decode.string
 
 
 main =
+    -- let _ =
+    --         Debug.log "main"
+    --             <| Circuit.run
+    --                 (Circuit.Seq "" (Circuit.Primitive "" (Gate.Id 2)) (Circuit.Primitive "" (Gate.Id 3)))
+    --                 (Array.fromList [1,2])
+    -- in Html.text "success"
+
   Browser.element { init = init
                   , update = update
                   , view = view

@@ -16,5 +16,11 @@ add a b = { x = a.x + b.x
           }
 
 
+scale : Float -> Point -> Point
+scale a b = { x = a * b.x
+            , y = a * b.y
+            }
+
+
 toTuple : Point -> (Float, Float)
 toTuple {x, y} = (x, y)
