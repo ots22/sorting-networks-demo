@@ -1,8 +1,10 @@
 module Main exposing (..)
 
 import Browser
-import Html exposing (Html, button, div, text)
-import Html.Events exposing (onClick)
+import Html exposing (Html)
+import Html.Attributes as HtmlAttr
+
+import Html.Events exposing (onClick, onCheck, onInput)
 import Browser.Events exposing (onKeyPress)
 import Json.Decode as Decode
 
@@ -22,6 +24,9 @@ import Util exposing (..)
 import Point exposing (Point)
 
 
+----------------------------------------
+-- Layout
+
 type alias Layout =
     { id : Int
     , unit : Float
@@ -32,59 +37,133 @@ type alias Layout =
     }
 
 
-getLayout : Circuit (a, Layout) -> Layout
-getLayout c =
-    case c of
-        Circuit.Primitive (_, layoutData) _ ->
-            layoutData
-
-        Circuit.Seq (_, layoutData) _ _ ->
-            layoutData
-
-        Circuit.Par (_, layoutData) _ _ ->
-            layoutData
+type alias LayoutCircuit a =
+    Circuit { a | layoutData : Layout }
 
 
-width : Circuit (a, Layout) -> Float
-width c =
-    (getLayout c).size.x
+type alias LayoutEvalCircuit =
+    Circuit { description : String
+            , layoutData : Layout
+            , runData : Circuit.RunData}
 
 
-height : Circuit (a, Layout) -> Float
-height c =
-    (getLayout c).size.y
+getLayout : LayoutCircuit a -> Layout
+getLayout = Circuit.getNodeData >> .layoutData
 
 
-translate : Point -> Circuit (a, Layout) -> Circuit (a, Layout)
-translate p c =
-    let f =
-            Tuple.mapSecond
-                (\{id, unit, posn, size, terminalsIn, terminalsOut} ->
-                     { id = id
-                     , unit = unit
-                     , posn = Point.add p posn
-                     , size = size
-                     , terminalsIn = List.map (Point.add p) terminalsIn
-                     , terminalsOut = List.map (Point.add p) terminalsOut
-                     })
-    in Circuit.map f c
+-- Efficient lookup of a subcircuit by id
+--
+-- Assumes that all 'right' children have greater ids than the 'left'
+-- children (see `layout`)
+getCircuitById : LayoutCircuit a -> Int -> Maybe (LayoutCircuit a)
+getCircuitById c id =
+    if id < (getLayout c).id then
+        Nothing
+
+    else if id == (getLayout c).id then
+        Just c
+
+    else
+        let rec u v =
+                if id < (getLayout v).id then
+                    getCircuitById u id
+
+                else
+                    getCircuitById v id
+        in
+            case c of
+                Circuit.Primitive _ _ ->
+                    Nothing
+
+                Circuit.Seq _ u v ->
+                    rec u v
+
+                Circuit.Par _ u v ->
+                    rec u v
 
 
-scale : Float -> Circuit (a, Layout) -> Circuit (a, Layout)
-scale a c =
-    let f =
-            Tuple.mapSecond
-                (\{id, unit, posn, size, terminalsIn, terminalsOut} ->
-                     { id = id
-                     , unit = a * unit
-                     , posn = Point.scale a posn
-                     , size = Point.scale a size
-                     , terminalsIn = List.map (Point.scale a) terminalsIn
-                     , terminalsOut = List.map (Point.scale a) terminalsOut
-                     })
-    in Circuit.map f c
+mapLayout : (Layout -> Layout) -> LayoutCircuit a -> LayoutCircuit a
+mapLayout f
+    = Circuit.map (\nodeData -> {nodeData | layoutData = f nodeData.layoutData})
 
-        
+
+width : LayoutCircuit a -> Float
+width = getLayout >> .size >> .x
+
+
+height : LayoutCircuit a -> Float
+height = getLayout >> .size >> .y
+
+
+translate : Point
+          -> LayoutCircuit a
+          -> LayoutCircuit a
+
+translate p =
+    mapLayout (\{id, unit, posn, size, terminalsIn, terminalsOut} ->
+                   { id = id
+                   , unit = unit
+                   , posn = Point.add p posn
+                   , size = size
+                   , terminalsIn = List.map (Point.add p) terminalsIn
+                   , terminalsOut = List.map (Point.add p) terminalsOut
+                   })
+
+
+scale : Float -> LayoutCircuit a -> LayoutCircuit a
+scale a =
+    mapLayout (\{id, unit, posn, size, terminalsIn, terminalsOut} ->
+                   { id = id
+                   , unit = a * unit
+                   , posn = Point.scale a posn
+                   , size = Point.scale a size
+                   , terminalsIn = List.map (Point.scale a) terminalsIn
+                   , terminalsOut = List.map (Point.scale a) terminalsOut
+                   })
+
+
+gatherWires : (LayoutCircuit a -> LayoutCircuit a
+              -> Int
+              -> Point -> Point
+              -> b)
+            -> LayoutCircuit a
+            -> List b
+
+gatherWires f circuit =
+    case circuit of
+        Circuit.Seq _ u v ->
+            let ul = getLayout u
+                vl = getLayout v
+                wires =
+                    List.map3 (f u v)
+                        (List.range 0 (List.length ul.terminalsOut - 1))
+                        ul.terminalsOut
+                        vl.terminalsIn
+            in
+                gatherWires f u ++ gatherWires f v ++ wires
+
+        Circuit.Par _ u v ->
+            gatherWires f u ++ gatherWires f v
+
+        _ ->
+            []
+
+
+getOutputValue : LayoutEvalCircuit -> Int -> Maybe Float
+getOutputValue circuit terminalIdx =
+    let mval = Array.get terminalIdx
+               << .outputs
+               << Circuit.getRunData
+               <| circuit
+    in
+        -- Treat a 'missing' terminal in the same way as a value of
+        -- Nothing on the wire.  This is consistent with `Circuit.run`.
+        -- This case shouldn't be accessible to the user, though.
+        Util.join mval
+
+
+------------
+
 terminalPosns : Int -> Point -> Float -> List Point
 terminalPosns n startPos h =
     List.map
@@ -95,7 +174,6 @@ terminalPosns n startPos h =
         (List.range 0 (n - 1))
 
 
--- helper for layout: width of known gates
 gateWidth : Gate -> Float
 gateWidth g =
     case g of
@@ -104,6 +182,9 @@ gateWidth g =
 
         Gate.CompareSwap _ ->
             0.3
+
+        Gate.Const _ ->
+            0.1
 
         _ ->
             1.0
@@ -114,9 +195,14 @@ gateHeight g =
     toFloat (max (Gate.fanIn g) (Gate.fanOut g))
 
 
-layoutHelper : Point -> Int -> Circuit a -> (Circuit (a, Layout), Int)
-layoutHelper startPos startId c =
-    case c of
+------------
+
+
+layoutHelper : Point -> Int -> (a -> Layout -> {b | layoutData : Layout})
+             -> Circuit a -> (LayoutCircuit b, Int)
+
+layoutHelper startPos startId collect circuit =
+    case circuit of
         Circuit.Primitive nodeData g ->
             let w = gateWidth g
                 h = gateHeight g
@@ -134,17 +220,17 @@ layoutHelper startPos startId c =
                             h
                     }
             in
-                ( Circuit.Primitive (nodeData, layoutData) g
+                ( Circuit.Primitive (collect nodeData layoutData) g
                 , startId + 1
                 )
 
         Circuit.Par nodeData u v ->
             let pad = 0.1
                 uPos = Point.add (Point.make pad 0.0) startPos
-                (u1, nextId1) = layoutHelper uPos (startId + 1) u
+                (u1, nextId1) = layoutHelper uPos (startId + 1) collect u
 
                 vPos = Point.add (Point.make 0.0 (height u1)) uPos
-                (v1, nextId2) = layoutHelper vPos nextId1 v
+                (v1, nextId2) = layoutHelper vPos nextId1 collect v
 
                 w = max (width u1) (width v1)
                 h = height u1 + height v1
@@ -167,17 +253,17 @@ layoutHelper startPos startId c =
                             (getLayout v2).terminalsOut
                     }
             in
-                ( Circuit.Par (nodeData, layoutData) u2 v2
+                ( Circuit.Par (collect nodeData layoutData) u2 v2
                 , nextId2
                 )
 
         Circuit.Seq nodeData u v ->
             let pad = 0.15
                 uPos = Point.add (Point.make pad 0.0) startPos
-                (u1, nextId1) = layoutHelper uPos (startId + 1) u
+                (u1, nextId1) = layoutHelper uPos (startId + 1) collect u
 
                 vPos = Point.add (Point.make ((width u1) + pad) 0.0) uPos
-                (v1, nextId2) = layoutHelper vPos nextId1 v
+                (v1, nextId2) = layoutHelper vPos nextId1 collect v
 
                 w = width u1 + width v1
                 h = max (height u1) (height v1)
@@ -194,74 +280,63 @@ layoutHelper startPos startId c =
                     , terminalsOut = (getLayout v2).terminalsOut
                     }
             in
-                ( Circuit.Seq (nodeData, layoutData) u2 v2
+                ( Circuit.Seq (collect nodeData layoutData) u2 v2
                 , nextId2
                 )
 
 
-layout : Circuit a -> Circuit (a, Layout)
-layout = Tuple.first << layoutHelper (Point.make 0.0 0.0) 0
+layout : (a -> Layout -> { b | layoutData : Layout }) -> Circuit a
+       -> LayoutCircuit b
+
+layout collect circuit =
+    layoutHelper (Point.make 0.0 0.0) 0 collect circuit
+        |> Tuple.first
 
 
--- efficient lookup of a subcircuit by id (all 'right' children have
--- greater ids than the 'left' children)
-getCircuitByIdHelper : Int
-                     -> Circuit (a, Layout)
-                     -> Circuit (a, Layout)
-                     -> Circuit (a, Layout)
-                     -> Maybe (Circuit (a, Layout))
-getCircuitByIdHelper id c u v =
-    if id < (getLayout c).id then
-        Nothing
-    else if id == (getLayout c).id then
-        Just c
-    else if id < (getLayout v).id  then
-        getCircuitById u id
-    else
-        getCircuitById v id
+----------------------------------------
+-- Formatting and drawing configuration
 
+formatWireValue : Maybe Float -> String
+formatWireValue val =
+    case val of
+        Just x ->
+            String.fromFloat x
 
-getCircuitById : Circuit (a, Layout) -> Int -> Maybe (Circuit (a, Layout))
-getCircuitById c id =
-    case c of
-        Circuit.Primitive _ _ ->
-            if id == (getLayout c).id then
-                Just c
-            else
-                Nothing
-
-        Circuit.Seq _ u v ->
-            getCircuitByIdHelper id c u v
-
-        Circuit.Par _ u v ->
-            getCircuitByIdHelper id c u v
+        Nothing ->
+            "_"
 
 
 ----------------------------------------
 
-
 type alias WireSelection =
     { from : Int
     , to : Int
-    , outTerm : Int
+    , terminalIdx : Int
     }
 
 
 type alias Model =
-    { circuit : Circuit (String, Layout)
+    { circuit : LayoutEvalCircuit
+    , circuitInputs : Array String
     , selectedBox : Maybe Int
     , selectedWire : Maybe WireSelection
+    , showWireValues : Bool
     , imgWidth : Int
     }
 
 
 type Msg
-    = BoxSelect (Maybe Int)
+    = SetInput Int String
+    | BoxSelect (Maybe Int)
     | WireSelect (Maybe WireSelection)
+    | ShowValuesChecked Bool
     | ZoomIn
     | ZoomOut
     | NoOp
 
+
+----------------------------------------
+-- SVG drawing routines
 
 drawBox : Layout -> Bool -> Svg Msg
 drawBox layoutData selected =
@@ -282,58 +357,12 @@ drawBox layoutData selected =
         []
 
 
-drawWires : Maybe WireSelection -> Layout -> Layout -> List (Svg Msg)
-drawWires selection ul vl =
-    let helper uTermOut vTermIn outTermIdx =
-            let colour =
-                    case selection of
-                        Nothing ->
-                            "black"
-                        Just { from, outTerm } ->
-                            if (from == ul.id) && (outTerm == outTermIdx) then
-                                "coral"
-                            else
-                                "black"
-            in
-                Svg.path
-                    [ SvgAttr.fill "none"
-                    , SvgAttr.stroke colour
-                    , SvgAttr.strokeWidth "1.5"
-                    , Svg.Events.onMouseOver
-                          <| WireSelect (Just { from = ul.id
-                                              , to = vl.id
-                                              , outTerm = outTermIdx
-                                              })
-                    , Svg.Events.onMouseOut <| WireSelect Nothing
-                    , SvgPath.d
-                          [ SvgPath.MoveTo False <| Point.toTuple uTermOut
-                          , SvgPath.CurveTo False
-                              (Point.toTuple
-                                   (Point.add uTermOut
-                                        <| Point.make
-                                            (vTermIn.x - uTermOut.x)
-                                            0.0))
-                              (Point.toTuple
-                                   (Point.add vTermIn
-                                        <| Point.make
-                                            (uTermOut.x - vTermIn.x)
-                                            0.0))
-                              (Point.toTuple vTermIn)
-                          ]
-                    ]
-                    []
-    in
-        List.map3 helper
-            ul.terminalsOut
-            vl.terminalsIn
-            (List.range 0 (List.length ul.terminalsOut - 1))
-
-
+drawConnector : Bool -> Point -> Point -> Svg Msg
 drawConnector arrow from to =
     Svg.line
         (List.append
              [ SvgAttr.stroke "black"
-             , SvgAttr.strokeWidth "1.5"
+             , SvgAttr.strokeWidth "2.0"
              , SvgAttr.x1 <| String.fromFloat from.x
              , SvgAttr.y1 <| String.fromFloat from.y
              , SvgAttr.x2 <| String.fromFloat to.x
@@ -352,6 +381,25 @@ drawGate g layoutData =
                 (List.map2 (drawConnector False)
                      layoutData.terminalsIn
                      layoutData.terminalsOut)
+
+        Gate.Const n ->
+            Svg.g
+                [ ]
+                [ Svg.circle
+                      [ SvgAttr.fill "black"
+                      , SvgAttr.stroke "none"
+                      , SvgAttr.cx
+                            <| String.fromFloat
+                            <| layoutData.posn.x + 0.5 * layoutData.size.x
+                      , SvgAttr.cy
+                            <| String.fromFloat
+                            <| layoutData.posn.y + 0.5 * layoutData.size.y
+                      , SvgAttr.r
+                            <| String.fromFloat
+                            <| 0.05 * layoutData.unit
+                      ]
+                      [ ]
+                ]
 
         Gate.Add ->
             Svg.rect
@@ -373,13 +421,11 @@ drawGate g layoutData =
                 ]
                 [ ]
 
-        Gate.CompareSwap { n, i, j, descend } ->
-            let (i2, j2) = if descend then (i, j) else (j, i)
-
-                mY1 = Array.get i2 (Array.fromList layoutData.terminalsIn)
+        Gate.CompareSwap { n, i, j } ->
+            let mY1 = Array.get i (Array.fromList layoutData.terminalsIn)
                       |> Maybe.map (.y)
 
-                mY2 = Array.get j2 (Array.fromList layoutData.terminalsIn)
+                mY2 = Array.get j (Array.fromList layoutData.terminalsIn)
                       |> Maybe.map (.y)
 
                 x = layoutData.posn.x + 0.5 * layoutData.size.x
@@ -403,26 +449,71 @@ drawGate g layoutData =
                                   [ ]))
 
 
-drawCircuitHelper : Model -> List (Svg Msg) -> List (Svg Msg)
-drawCircuitHelper model collect =
+drawCircuitWires : Model -> List (Svg Msg)
+drawCircuitWires model =
+    let drawOneWire u v i uTermOut vTermIn =
+            let ul = getLayout u
+                vl = getLayout v
+                colour =
+                    case model.selectedWire of
+                        Nothing ->
+                            "black"
+                        Just { from, terminalIdx } ->
+                            if from == ul.id && terminalIdx == i then
+                                "coral"
+                            else
+                                "black"
+            in
+                Svg.path
+                    [ SvgAttr.fill "none"
+                    , SvgAttr.stroke colour
+                    , SvgAttr.strokeWidth "2.0"
+                    , Svg.Events.onMouseOver
+                          <| WireSelect (Just { from = ul.id
+                                              , to = vl.id
+                                              , terminalIdx = i
+                                              })
+                    , Svg.Events.onMouseOut <| WireSelect Nothing
+                    , SvgPath.d
+                          [ SvgPath.MoveTo False <| Point.toTuple uTermOut
+                          , SvgPath.CurveTo False
+                              (Point.toTuple
+                                   (Point.add uTermOut
+                                        <| Point.make
+                                            (vTermIn.x - uTermOut.x)
+                                            0.0))
+                              (Point.toTuple
+                                   (Point.add vTermIn
+                                        <| Point.make
+                                            (uTermOut.x - vTermIn.x)
+                                            0.0))
+                              (Point.toTuple vTermIn)
+                          ]
+                    ]
+                    []
+    in
+        gatherWires drawOneWire model.circuit
+
+
+drawCircuitElements : Model -> List (Svg Msg) -> List (Svg Msg)
+drawCircuitElements model collect =
     case model.circuit of
-        Circuit.Primitive (_, layoutData) g ->
+        Circuit.Primitive {layoutData} g ->
             collect
             ++ [drawGate g layoutData]
             ++ [drawBox layoutData (model.selectedBox == Just layoutData.id)]
 
-        Circuit.Par (_, layoutData) u v ->
+        Circuit.Par {layoutData} u v ->
             collect
             ++ [drawBox layoutData (model.selectedBox == Just layoutData.id)]
-            ++ (drawCircuitHelper { model | circuit = u } [])
-            ++ (drawCircuitHelper { model | circuit = v } [])
+            ++ (drawCircuitElements { model | circuit = u } [])
+            ++ (drawCircuitElements { model | circuit = v } [])
 
-        Circuit.Seq (_, layoutData) u v ->
+        Circuit.Seq {layoutData} u v ->
             collect
             ++ [drawBox layoutData (model.selectedBox == Just layoutData.id)]
-            ++ (drawCircuitHelper { model | circuit = u } [])
-            ++ (drawCircuitHelper { model | circuit = v } [])
-            ++ drawWires model.selectedWire (getLayout u) (getLayout v)
+            ++ (drawCircuitElements { model | circuit = u } [])
+            ++ (drawCircuitElements { model | circuit = v } [])
 
 
 drawCircuit : Model -> Svg Msg
@@ -430,67 +521,128 @@ drawCircuit model =
     let w = String.fromFloat <| width model.circuit
         h = String.fromFloat <| height model.circuit
         r = (width model.circuit) / (height model.circuit)
-        imgWidth = model.imgWidth    
-        imgHeight = round (toFloat model.imgWidth / r)
-        padWidth = 10.0
-        padHeight = padWidth / r
+        imgWidth = model.imgWidth + 20
+        imgHeight = round (toFloat model.imgWidth / r) + 20
     in
         Svg.svg
-            [ SvgAttr.width  <| String.fromInt imgWidth
-            , SvgAttr.height <| String.fromInt imgHeight
+            [ SvgAttr.width  <| String.fromInt <| imgWidth + 20
+            , SvgAttr.height <| String.fromInt <| imgHeight + 20
             , SvgAttr.viewBox
                   <| String.join " "
                   <| List.map String.fromFloat
-                      [ -padWidth
-                      , -padWidth
-                      , (toFloat imgWidth) + 2.0 * padWidth
-                      , (toFloat imgHeight) + 2.0 * padWidth
+                      [ 0.0
+                      , 0.0
+                      , toFloat <| imgWidth + 20
+                      , toFloat <| imgHeight + 20
                       ]
             , SvgAttr.preserveAspectRatio "xMidYMid meet"
             ]
-            <| List.append
-                [ Svg.defs
-                      []
-                      [ Svg.marker
-                            [ SvgAttr.id "arrow"
-                            , SvgAttr.markerWidth "10"
-                            , SvgAttr.markerHeight "10"
-                            , SvgAttr.refX "9"
-                            , SvgAttr.refY "3"
-                            , SvgAttr.orient "auto"
-                            , SvgAttr.markerUnits "strokeWidth" ]
-                            [ Svg.path
-                                  [ SvgPath.d
-                                        [ SvgPath.MoveTo False (0.0, 0.0)
-                                        , SvgPath.LineTo False (0.0, 6.0)
-                                        , SvgPath.LineTo False (9.0, 3.0)
-                                        , SvgPath.ClosePath
-                                        ]
-                                  ]
-                                  [ ]
-                            ]
-                      ]
+            <| List.concat
+                [ [ Svg.defs
+                        []
+                        [ Svg.marker
+                              [ SvgAttr.id "arrow"
+                              , SvgAttr.markerWidth "10"
+                              , SvgAttr.markerHeight "10"
+                              , SvgAttr.refX "9"
+                              , SvgAttr.refY "3"
+                              , SvgAttr.orient "auto"
+                              , SvgAttr.markerUnits "strokeWidth" ]
+                              [ Svg.path
+                                    [ SvgPath.d
+                                          [ SvgPath.MoveTo False (0.0, 0.0)
+                                          , SvgPath.LineTo False (0.0, 6.0)
+                                          , SvgPath.LineTo False (9.0, 3.0)
+                                          , SvgPath.ClosePath
+                                          ]
+                                    ]
+                                    [ ]
+                              ]
+                        ]
+                  ]
+                , drawCircuitElements model []
+                , drawCircuitWires model
                 ]
-                (drawCircuitHelper model [])
 
 
 describeSelection : Model -> Html Msg
 describeSelection model =
-    case Util.bind model.selectedBox (getCircuitById model.circuit) of
+    case Maybe.andThen (getCircuitById model.circuit) model.selectedBox
+    of
         Nothing ->
             Html.text ""
 
-        Just (Circuit.Primitive (description, _) g) ->
+        Just (Circuit.Primitive {description} g) ->
             Html.div []
                 [ (Html.div [] [ Html.text <| Gate.name g ])
                 , (Html.div [] [ Html.text description ])
                 ]
 
-        Just (Circuit.Seq (description, _) _ _) ->
+        Just (Circuit.Seq {description} _ _) ->
             Html.text description
 
-        Just (Circuit.Par (description, _) _ _) ->
+        Just (Circuit.Par {description} _ _) ->
             Html.text description
+
+
+drawWireValue : WireSelection -> LayoutEvalCircuit -> List (Html Msg)
+drawWireValue {from, to, terminalIdx} circuit =
+    let mfromCircuit =
+            getCircuitById circuit from
+
+        mtoCircuit =
+            getCircuitById circuit to
+
+        mfromPosn =
+            Maybe.andThen (Array.get terminalIdx)
+                << Maybe.map (Array.fromList << .terminalsOut << getLayout)
+                <| mfromCircuit
+
+        mtoPosn =
+            Maybe.andThen (Array.get terminalIdx)
+                << Maybe.map (Array.fromList << .terminalsIn << getLayout)
+                <| mtoCircuit
+    in
+        case ( (mfromCircuit, mtoCircuit),
+                   (mfromPosn, mtoPosn) )
+        of
+            ( (Just fromCircuit, Just toCircuit),
+                  (Just fromPosn, Just toPosn) )
+                ->
+                  let val = getOutputValue fromCircuit terminalIdx
+                  in
+                      [ Html.div
+                            [ HtmlAttr.style "position" "absolute"
+                            , HtmlAttr.style "text-align" "center"
+                            , HtmlAttr.style "color" "DarkGreen" -- "WhiteSmoke"
+                            , HtmlAttr.style "background" "none" -- "DarkGreen"
+                            , HtmlAttr.style "opacity" "0.5"
+                            , HtmlAttr.style "padding" "5pt 5pt 5pt 5pt"
+                            , HtmlAttr.style "border-radius" "2pt"
+                            , HtmlAttr.style "top"
+                                <| (String.fromFloat
+                                        <| 0.5 * (toPosn.y + fromPosn.y) + 2.0)
+                                    ++ "px"
+                            , HtmlAttr.style "left"
+                                <| (String.fromFloat
+                                        <| 0.5 * (toPosn.x + fromPosn.x) - 10.0)
+                                    ++ "px"
+                            ]
+                            [ Html.text <| formatWireValue val ] ]
+
+            _ ->
+                [ ]
+
+
+showWireValue : Model -> List (Html Msg)
+showWireValue model =
+    case model.selectedWire of
+        Just wireSelection ->
+            drawWireValue wireSelection model.circuit
+
+        -- Nothing selected
+        Nothing ->
+            [ ]
 
 
 appendIOGates : Circuit String -> Circuit String
@@ -504,19 +656,34 @@ appendIOGates c =
 
 init : () -> (Model, Cmd Msg)
 init _ =
-    let c = layout
-            <| appendIOGates
-            -- <| Circuit.simplify
-            <| (Circuit.Seq ""
-                    (Circuit.Primitive "" (Gate.Id 2))
-                    (Circuit.Primitive "" (Gate.Id 1)))
-            -- <| Circuit.bitonicSort 32 Circuit.Descending
-            -- <| Circuit.Seq "" (Circuit.Primitive "" Gate.Add) (Circuit.Primitive "" Gate.Add)
+    let collectRunData description runData =
+            { description = description
+            , runData = runData }
+
+        collectLayoutData {description, runData} layoutData =
+            { description = description
+            , runData = runData
+            , layoutData = layoutData
+            }
+
+        c =
+            appendIOGates
+            <| Circuit.simplify
+            <| Circuit.bitonicSort 32 Circuit.Descending
+
+        cRunLayout =
+            Array.repeat (Circuit.fanIn c) Nothing
+                |> Circuit.runAnnotate collectRunData c
+                >> layout collectLayoutData
+                >> scale 100.0
+                >> translate (Point.make 10.0 10.0)
     in
-        ( { circuit = scale 100.0 c
+        ( { circuit = cRunLayout
+          , circuitInputs = Array.repeat (Circuit.fanIn c) ""
           , selectedBox = Nothing
           , selectedWire = Nothing
-          , imgWidth = round <| 100.0 * width c
+          , showWireValues = False
+          , imgWidth = round <| width cRunLayout
           }
         , Cmd.none
         )
@@ -554,13 +721,129 @@ update msg model =
         NoOp ->
             ( model, Cmd.none )
 
+        ShowValuesChecked b ->
+            ( { model | showWireValues = b }, Cmd.none )
+
+        SetInput i v ->
+            let updateRunData {description, layoutData, runData} r =
+                    { description = description
+                    , layoutData = layoutData
+                    , runData = r}
+
+                circuitInputsNew =
+                    Array.set i v model.circuitInputs
+
+                inputsNew =
+                    Array.set i (String.toFloat v)
+                        (Circuit.getRunData model.circuit).inputs
+            in
+                ( { model
+                      | circuit =
+                          Circuit.runAnnotate updateRunData
+                              model.circuit
+                              inputsNew
+
+                      , circuitInputs = circuitInputsNew
+                  }
+                , Cmd.none )
+
+
+showCircuitInput : Point -> String -> (String -> msg) -> Html msg
+showCircuitInput posn currentValue inputMakeMsg =
+    Html.div [ HtmlAttr.style "position" "absolute"
+             , HtmlAttr.style "top" <| String.fromFloat posn.y ++ "px"
+             , HtmlAttr.style "left" <| String.fromFloat posn.x ++ "px"
+             , HtmlAttr.style "transform" "translate(0, -50%)"
+             , onInput inputMakeMsg
+             ]
+        [ Html.input [ HtmlAttr.type_ "text"
+                     , HtmlAttr.value currentValue
+                     , HtmlAttr.style "text-align" "center"
+                     , HtmlAttr.style "width" "2em"
+                     , HtmlAttr.style "padding" "1ex 0em"
+                     , HtmlAttr.style "border" "1.5pt solid black"
+                     , HtmlAttr.style "font-family" "futura"
+                     , HtmlAttr.style "font-size" "12pt"
+                     ]
+              [ ] ]
+
+
+showCircuitOutput : Point -> Maybe Float -> Html msg
+showCircuitOutput posn currentValue =
+    Html.div [ HtmlAttr.style "position" "absolute"
+             , HtmlAttr.style "top" <| String.fromFloat posn.y ++ "px"
+             , HtmlAttr.style "left" <| String.fromFloat posn.x ++ "px"
+             , HtmlAttr.style "transform" "translate(0, -50%)"
+             ]
+        [ Html.input [ HtmlAttr.type_ "text"
+                     , HtmlAttr.readonly True
+                     , HtmlAttr.style "outline" "none"
+                     , HtmlAttr.value << formatWireValue <| currentValue
+                     , HtmlAttr.style "text-align" "center"
+                     , HtmlAttr.style "width" "2em"
+                     , HtmlAttr.style "padding" "1ex 0em"
+                     , HtmlAttr.style "border" "1.5pt solid black"
+                     , HtmlAttr.style "font-family" "futura"
+                     , HtmlAttr.style "font-size" "12pt"
+                     ]
+              [ ] ]
+
 
 view : Model -> Html Msg
 view model =
-    Html.div []
-        [ drawCircuit model
-        , Html.div [] [ describeSelection model ]
+    Html.div
+        [ HtmlAttr.style "position" "relative"
+        , HtmlAttr.style "font-family" "Futura, sans-serif"
+        , HtmlAttr.style "margin-left" "1em"
         ]
+        ( [ Html.div
+              [ HtmlAttr.style "position" "relative"
+              , HtmlAttr.style "margin-left" "25pt" ]
+              ( [ drawCircuit model ]
+                    ++ (List.concat
+                            (if model.showWireValues then
+                                 gatherWires (\u v i uTermOut vTermIn ->
+                                                  drawWireValue { from = (getLayout u).id
+                                                                , to = (getLayout v).id
+                                                                , terminalIdx = i
+                                                                }
+                                                  model.circuit
+                                             )
+                                 model.circuit
+                             else
+                                 []))
+                    ++ showWireValue model
+                    ++ [ Html.div [ ]
+                             [ Html.label [ ]
+                                   [ Html.input [ HtmlAttr.type_ "checkbox"
+                                                , HtmlAttr.checked model.showWireValues
+                                                , onCheck ShowValuesChecked ]
+                                         [ ]
+                                   , Html.text "Show values "
+                                   ] ] ]
+              ) ]
+              ++ (let inputPositions = (getLayout model.circuit).terminalsIn
+                      inputValues = Array.toList model.circuitInputs
+                      inputCount = List.length inputValues
+                      inputMakeMsgs = List.map SetInput (List.range 0 (inputCount - 1))
+                  in
+                  List.map3 showCircuitInput
+                      inputPositions
+                      inputValues
+                      inputMakeMsgs
+                 )
+              ++ (let outputPositions = (getLayout model.circuit).terminalsOut
+                      outputValues = Array.toList (Circuit.getRunData model.circuit).outputs
+                      outputCount = List.length outputValues
+                  in
+                  List.map2 (showCircuitOutput << Point.add (Point.make 10.0 0.0))
+                      outputPositions
+                      outputValues
+                 )
+              )
+
+        -- , Html.div [] [ describeSelection model ]
+        -- ]
 
 
 handleKeyPress : String -> Msg
@@ -584,15 +867,9 @@ subscriptions _ =
 
 
 main =
-    -- let _ =
-    --         Debug.log "main"
-    --             <| Circuit.run
-    --                 (Circuit.Seq "" (Circuit.Primitive "" (Gate.Id 2)) (Circuit.Primitive "" (Gate.Id 3)))
-    --                 (Array.fromList [1,2])
-    -- in Html.text "success"
+    Browser.element { init = init
+                    , update = update
+                    , view = view
+                    , subscriptions = subscriptions
+                    }
 
-  Browser.element { init = init
-                  , update = update
-                  , view = view
-                  , subscriptions = subscriptions
-                  }

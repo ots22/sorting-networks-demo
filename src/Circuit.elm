@@ -21,6 +21,19 @@ seq x y =
     Seq () x y
 
 
+getNodeData : Circuit a -> a
+getNodeData c =
+    case c of
+        Primitive a _ ->
+            a
+
+        Seq a _ _ ->
+            a
+
+        Par a _ _ ->
+            a
+
+        
 map : (a -> b) -> Circuit a -> Circuit b
 map f c =
     case c of
@@ -60,20 +73,74 @@ fanOut c =
             fanOut y
 
 
-run : Circuit a -> Array Int -> Array Int
+type alias RunData =
+    { inputs : Array (Maybe Float)
+    , outputs : Array (Maybe Float)
+    }
+
+                
+getRunData : Circuit {a | runData : RunData} -> RunData
+getRunData = getNodeData >> .runData
+
+
+runAnnotate : (a -> RunData -> {b | runData : RunData})
+            -> Circuit a
+            -> Array (Maybe Float)
+            -> Circuit {b | runData : RunData}
+
+runAnnotate collect circuit inputs =
+    case circuit of
+        Primitive a g ->
+            let runData = { inputs = inputs
+                          , outputs = Gate.run g inputs
+                          }
+            in
+                Primitive (collect a runData) g
+                
+        Par a u v ->
+            let uInput = Array.slice 0 (fanIn u) inputs
+                ua = runAnnotate collect u uInput
+                uResult = getRunData ua
+
+                vInput = Array.slice (fanIn u) (fanIn u + fanIn v) inputs
+                va = runAnnotate collect v vInput
+                vResult = getRunData va
+
+                runData = { inputs = inputs
+                          , outputs =
+                              Array.append uResult.outputs vResult.outputs
+                          }
+            in
+                Par (collect a runData) ua va
+
+        Seq a u v ->
+            let ua = runAnnotate collect u inputs
+                uResult = getRunData ua
+
+                va = runAnnotate collect v uResult.outputs
+                vResult = getRunData va
+
+                runData = { inputs = inputs
+                          , outputs = vResult.outputs
+                          }
+            in
+                Seq (collect a runData) ua va
+
+                
+run : Circuit a -> Array (Maybe Float) -> Array (Maybe Float)
 run c inputs =
     case c of
         Primitive _ g ->
             Gate.run g inputs
 
-        Par _ a b ->
-            let inputsA = Array.slice 0 (fanIn a) inputs
-                inputsB = Array.slice (fanIn a) ((fanIn a) + (fanIn b)) inputs
+        Par _ u v ->
+            let uInput = Array.slice 0 (fanIn u) inputs
+                vInput = Array.slice (fanIn u) (fanIn u + fanIn v) inputs
             in
-                Array.append (run a inputsA) (run b inputsB)
+                Array.append (run u uInput) (run v vInput)
 
-        Seq _ a b ->
-            (run a >> run b) inputs
+        Seq _ u v ->
+            (run u >> run v) inputs
 
 
 simplifyHelper : Circuit a -> (Circuit a, Bool)
@@ -144,12 +211,11 @@ sortDirectionToString d =
         Descending -> "Descending"
 
 
-compareSwap : Int -> Int -> Int -> SortDirection -> Circuit String
-compareSwap n i j sortDirection =
+compareSwap : Int -> Int -> Int -> Circuit String
+compareSwap n i j =
     Primitive "" (Gate.CompareSwap { n = n
                                    , i = i
                                    , j = j
-                                   , descend = (sortDirection == Descending)
                                    })
 
 
@@ -159,7 +225,10 @@ bitonicCompareSwap n sortDirection =
                            , String.fromInt n
                            , sortDirectionToString sortDirection
                            ])
-        <| List.foldl (\i c -> Seq "" c (compareSwap n i (i + n//2) sortDirection))
+        <| List.foldl (\i c -> Seq "" c (if sortDirection == Descending then
+                                             compareSwap n i (i + n//2)
+                                         else
+                                             compareSwap n (i + n//2) i))
             (id n)
             (List.range 0 (n//2 - 1))
 

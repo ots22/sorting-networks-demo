@@ -8,3 +8,7 @@ bind ma f =
 
         Nothing ->
             Nothing
+
+
+join : Maybe (Maybe a) -> Maybe a
+join = Maybe.andThen identity
