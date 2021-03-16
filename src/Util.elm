@@ -1,5 +1,6 @@
 module Util exposing (..)
 
+
 bind : Maybe a -> (a -> Maybe b) -> Maybe b
 bind ma f =
     case ma of
@@ -11,4 +12,5 @@ bind ma f =
 
 
 join : Maybe (Maybe a) -> Maybe a
-join = Maybe.andThen identity
+join =
+    Maybe.andThen identity
