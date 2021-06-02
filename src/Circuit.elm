@@ -11,14 +11,14 @@ type Circuit a
     | Seq a (Circuit a) (Circuit a)
 
 
-par : Circuit () -> Circuit () -> Circuit ()
+par : Circuit String -> Circuit String -> Circuit String
 par x y =
-    Par () x y
+    Par "" x y
 
 
-seq : Circuit () -> Circuit () -> Circuit ()
+seq : Circuit String -> Circuit String -> Circuit String
 seq x y =
-    Seq () x y
+    Seq "" x y
 
 
 getNodeData : Circuit a -> a
@@ -242,6 +242,19 @@ id n =
     Primitive "" (Gate.Id n)
 
 
+sum : Int -> Circuit String
+sum n =
+    amend "Sum" <|
+        if n == 1 then
+            id 1
+
+        else if n == 2 then
+            Primitive "" Gate.Add
+
+        else
+            seq (par (sum (n - 1)) (sum (n - 1))) <| sum 2
+
+
 type SortDirection
     = Ascending
     | Descending
@@ -268,6 +281,10 @@ compareSwap n i j =
         )
 
 
+
+-- Bitonic sort
+
+
 bitonicCompareSwap : Int -> SortDirection -> Circuit String
 bitonicCompareSwap n sortDirection =
     amend
@@ -280,7 +297,7 @@ bitonicCompareSwap n sortDirection =
     <|
         List.foldl
             (\i c ->
-                Seq ""
+                seq
                     c
                     (if sortDirection == Descending then
                         compareSwap n i (i + n // 2)
@@ -307,9 +324,9 @@ bitonicMerge n sortDirection =
             id 1
 
         else
-            Seq ""
+            seq
                 (bitonicCompareSwap n sortDirection)
-                (Par ""
+                (par
                     (bitonicMerge (n // 2) sortDirection)
                     (bitonicMerge (n // 2) sortDirection)
                 )
@@ -329,22 +346,108 @@ bitonicSort n sortDirection =
             id 1
 
         else
-            Seq ""
-                (Par ""
+            seq
+                (par
                     (bitonicSort (n // 2) Descending)
                     (bitonicSort (n // 2) Ascending)
                 )
                 (bitonicMerge n sortDirection)
 
 
-sum : Int -> Circuit String
-sum n =
-    amend "Sum" <|
+
+-- Insertion sort
+
+
+insertionEmplace : Int -> Circuit String
+insertionEmplace n =
+    amend (String.join " " [ "insertionEmplace", String.fromInt n ]) <|
         if n == 1 then
             id 1
 
-        else if n == 2 then
-            Primitive "" Gate.Add
+        else
+            seq
+                (compareSwap n (n - 2) (n - 1))
+                (par (insertionEmplace (n - 1)) (id 1))
+
+
+insertionSort : Int -> Circuit String
+insertionSort n =
+    amend (String.join " " [ "insertionSort", String.fromInt n ]) <|
+        if n == 1 then
+            id 1
 
         else
-            Seq "" (Par "" (sum (n - 1)) (sum (n - 1))) <| sum 2
+            seq
+                (par (insertionSort (n - 1)) (id 1))
+                (insertionEmplace n)
+
+
+
+-- Bubble sort
+
+
+bubbleEmplace : Int -> Circuit String
+bubbleEmplace n =
+    amend (String.join " " [ "bubbleEmplace", String.fromInt n ]) <|
+        if n == 1 then
+            id 1
+
+        else
+            seq
+                (par (bubbleEmplace (n - 1)) (id 1))
+                (compareSwap n (n - 2) (n - 1))
+
+
+bubbleSort : Int -> Circuit String
+bubbleSort n =
+    amend (String.join " " [ "bubbleSort", String.fromInt n ]) <|
+        if n == 1 then
+            id 1
+
+        else
+            seq
+                (bubbleEmplace n)
+                (par (bubbleSort (n - 1)) (id 1))
+
+
+
+-- Combined insertion/bubble sort
+
+
+alternatingCompareSwap : Int -> Circuit String
+alternatingCompareSwap n =
+    if n == 1 then
+        id 1
+
+    else if n == 2 then
+        compareSwap 2 0 1
+
+    else
+        par (alternatingCompareSwap (n - 2))
+            (compareSwap 2 0 1)
+
+
+insertBubbleSort : Int -> Circuit String
+insertBubbleSort n =
+    let
+        left k =
+            if k == 1 then
+                id 1
+
+            else
+                seq (par (left (k - 1)) (id 1))
+                    (alternatingCompareSwap k)
+
+        right k =
+            if k == 1 then
+                id 1
+
+            else
+                seq (alternatingCompareSwap k)
+                    (par (right (k - 1)) (id 1))
+    in
+    if n == 1 then
+        id 1
+
+    else
+        seq (left n) (par (right (n - 1)) (id 1))
