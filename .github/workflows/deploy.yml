@@ -19,7 +19,7 @@ jobs:
           elm-version: 0.19.1
       
       - name: Build
-      - run: elm make src/Main.elm --optimize --output _deploy/main.js
+        run: elm make src/Main.elm --optimize --output _deploy/main.js
       
       - name: Copy static files
         run: cp index.html style.css _deploy/
