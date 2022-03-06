@@ -30,5 +30,5 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: gh-pages
           folder: _deploy
-          message: Deploy to gh-pages
+          commit-message: Deploy to gh-pages
           clean: true
