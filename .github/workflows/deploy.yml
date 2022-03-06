@@ -1,0 +1,32 @@
+name: Build and deploy to GitHub Pages
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-app:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2.4.0
+        with:
+          persist-credentials: false
+
+      - name: Build
+      - uses: jorelali/setup-elm@v3
+        with:
+          elm-version: 0.19.1
+      - run: elm make src/Main.elm --optimize --output _deploy/
+      
+      - name: Copy static files
+      - run: cp index.html style.css _deploy/
+
+      - name: Deploy
+        uses: JamesIves/github-pages-deploy-action@v4.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: gh-pages
+          folder: _deploy
+          message: Deploy to gh-pages
+          clean: true
