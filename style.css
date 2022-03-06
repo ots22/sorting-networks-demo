@@ -1,0 +1,26 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0px;
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 12pt;
+}
+
+.main-model {
+    margin: 20px;
+}
+
+.main-controls {
+    margin: 20px 0px 20px 0px;
+}
+
+.main-dropdown-1 {
+    height: 4ex;
+}
+
+.main-number-input-1 {
+    height: 4ex;
+    width: 5ex;
+}
