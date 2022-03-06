@@ -68,8 +68,8 @@ defaultConfig toMsg =
     , showZoomControl = True
     , showRandomInputControl = True
     , withIO = True
-    , lineWidth = "2.5"
-    , lineWidthBox = "3.0"
+    , lineWidth = "2.0"
+    , lineWidthBox = "2.5"
     }
 
 
@@ -135,7 +135,7 @@ init withIOGates circuit =
             Array.repeat (Circuit.fanIn c) Nothing
                 |> Circuit.runAnnotate collectRunData c
                 >> layout collectLayoutData
-                >> scale 100.0
+                >> scale 60.0
                 >> translate (Point.make 10.0 10.0)
     in
     { circuit = cRunLayout
@@ -271,7 +271,7 @@ view config model =
 
         showValuesCheckbox =
             if config.withIO then
-                [ viewCheckbox "Show values"
+                [ viewCheckbox "Show wire values"
                     (config.toMsg << ShowValuesChecked)
                     model.showWireValues
                 ]
@@ -282,7 +282,7 @@ view config model =
         randomInputsButton =
             if config.showRandomInputControl then
                 [ Html.div
-                    []
+                    [ HtmlAttr.title "Set inputs" ]
                     [ Html.button
                         [ Html.Events.onClick (config.toMsg RandomInput)
                         , HtmlAttr.style "border-width" "0pt"
@@ -304,8 +304,8 @@ view config model =
                 [ Html.div
                     []
                     [ Html.button
-                        [ HtmlAttr.style "font-family" "Futura, sans-serif"
-                        , HtmlAttr.style "font-size" "12pt"
+                        [ -- HtmlAttr.style "font-family" "Futura, sans-serif"
+                         HtmlAttr.style "font-size" "12pt"
                         , HtmlAttr.style "text-align" "center"
                         , HtmlAttr.style "width" "1.5em"
                         , HtmlAttr.style "height" "1.5em"
@@ -315,8 +315,8 @@ view config model =
                         ]
                         [ Html.text "+" ]
                     , Html.button
-                        [ HtmlAttr.style "font-family" "Futura, sans-serif"
-                        , HtmlAttr.style "font-size" "12pt"
+                        [ -- HtmlAttr.style "font-family" "Futura, sans-serif"
+                         HtmlAttr.style "font-size" "12pt"
                         , HtmlAttr.style "text-align" "center"
                         , HtmlAttr.style "width" "1.5em"
                         , HtmlAttr.style "height" "1.5em"
@@ -332,9 +332,7 @@ view config model =
                 []
     in
     Html.div
-        [ HtmlAttr.style "font-family" "Futura, sans-serif"
-        , HtmlAttr.style "margin-left" "1em"
-        ]
+        [ ]
     <|
         zoomInOutButtons
             ++ showValuesCheckbox
@@ -812,12 +810,13 @@ viewCircuitInput config posn currentValue inputMakeMsg =
         ]
         [ Html.input
             [ HtmlAttr.type_ "text"
+            , HtmlAttr.class "circuit-diagram-io"
             , HtmlAttr.value currentValue
             , HtmlAttr.style "text-align" "center"
-            , HtmlAttr.style "width" "2em"
+            , HtmlAttr.style "width" "2.2em"
+            , HtmlAttr.style "height" "2.2em"
             , HtmlAttr.style "padding" "1ex 0em"
             , HtmlAttr.style "border" (config.lineWidth ++ "px solid black")
-            , HtmlAttr.style "font-family" "futura"
             , HtmlAttr.style "font-size" "12pt"
             ]
             []
@@ -861,14 +860,15 @@ viewCircuitOutput config posn currentValue =
         ]
         [ Html.input
             [ HtmlAttr.type_ "text"
+            , HtmlAttr.class "circuit-diagram-io"
             , HtmlAttr.readonly True
             , HtmlAttr.style "outline" "none"
             , HtmlAttr.value << formatWireValue <| currentValue
             , HtmlAttr.style "text-align" "center"
-            , HtmlAttr.style "width" "2em"
+            , HtmlAttr.style "width" "2.2em"
+            , HtmlAttr.style "height" "2.2em"
             , HtmlAttr.style "padding" "1ex 0em"
             , HtmlAttr.style "border" (config.lineWidth ++ "px solid black")
-            , HtmlAttr.style "font-family" "futura"
             , HtmlAttr.style "font-size" "12pt"
             ]
             []
