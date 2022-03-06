@@ -13,14 +13,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build
-      - uses: jorelali/setup-elm@v3
+      - name: Setup Elm
+        uses: jorelali/setup-elm@v3
         with:
           elm-version: 0.19.1
-      - run: elm make src/Main.elm --optimize --output _deploy/
+      
+      - name: Build
+      - run: elm make src/Main.elm --optimize --output _deploy/main.js
       
       - name: Copy static files
-      - run: cp index.html style.css _deploy/
+        run: cp index.html style.css _deploy/
 
       - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4.2.2
